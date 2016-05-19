@@ -2,13 +2,14 @@
 	// strategy: 
 
 	init: function(elevators, floors) {
-		var waiting_floors = [];
+		var up_waiting_floors = [];
+		var down_waiting_floors = [];
 		var top_floor = floors.length - 1;
-		var hold = true;
+		var hold = false;
 		var hold_delay = 300;
 
 
-		var prio_offload_enabled = true;
+		var prio_offload_enabled = false;
 		var prio_offload_elv_list = [1];			// elevators that use priority offload
 		var prio_offload_threshold = 0.5;			// min laod factor at which we offload on priority
 		var prio_offload_min_load_factor = 0.3;		// min ratio of passengers that need to be going to a single floor
@@ -22,7 +23,7 @@
 			elevator.num = i;
 			elevator.prio_offload = false;
 
-			elevator.floor_loads = new Array(floor.length);			// apprx. load headed for each of the floors
+			elevator.floor_loads = new Array(floors.length);			// apprx. load headed for each of the floors
 			elevator.floor_loads.fill(0);
 
 			//console.log("elv: ", i, " max: ", elevator.maxPassengerCount());
@@ -30,7 +31,10 @@
 			// Whenever the elevator is idle (has no more queued destinations) ...
 			elevator.on("idle", function() {
 				this.idle = true;
-				handle_call("", -1);
+				this.goingUpIndicator(true);
+				this.goingDownIndicator(true);
+
+				handle_idle(this);
 			});
 
 			elevator.on("floor_button_pressed", function(floorNum) {
@@ -41,14 +45,8 @@
 				handle_stop(this, floorNum);
 			});
 
-			elevator.on("passing_floor", function(floorNum, direction) {
-				if (waiting_floors.length > 0 && can_accomodate(this)) {
-					var fl_index = waiting_floors.indexOf(floorNum);
-					if (fl_index > -1) {
-						waiting_floors.splice(fl_index, 1);
-						this.goToFloor(floorNum, true);
-					}
-				}
+			elevator.on("passing_floor", function(floorNum, dir) {
+				handle_passing_floor(floorNum, dir, this);
 			});
 		}
 
@@ -64,16 +62,28 @@
 				//console.log("down button pressed: " + this.floorNum());
 			});
 		}
-		
+
+		function handle_passing_floor(floorNum, dir, elevator) {
+				var wf = [];
+
+				if (dir == "up")
+						wf = up_waiting_floors;
+				else (dir == "down")
+						wf = down_waiting_floors;
+
+				if (wf.length > 0 && can_accomodate(elevator)) {
+					floorNum = pop_if_in_array(floorNum, wf);
+					floorNum > -1 && elevator.goToFloor(floorNum);
+				}
+		}
+
 		function handle_stop(elevator, floorNum) {
 			delete_if_in_array(floorNum, elevator.upQueue);
 			delete_if_in_array(floorNum, elevator.downQueue);
 
-			var fl_index = waiting_floors.indexOf(floorNum);
-			if (fl_index > -1) {
-				waiting_floors.splice(fl_index, 1);
-			}
-		
+			delete_if_in_array(floorNum, up_waiting_floors);
+			delete_if_in_array(floorNum, down_waiting_floors);
+
 			elevator.floor_loads[floorNum] = 0;
 
 	 		if (elevator.prio_offload) {
@@ -113,14 +123,14 @@
 
 		// select up/down queue based on apprx. passenger count
 		function select_queue(elevator) {
-			uq_passenger_count = 0;
-			dq_passenger_count = 0;
+			var uq_passenger_count = 0;
+			var dq_passenger_count = 0;
 
 			// get counts
 
 			if (uq_passenger_count > dq_passenger_count) {
 					elevator.queue = elevator.upQueue;
-			} else
+			} else {
 					elevator.queue = elevator.downQueue;
 			}
 			elevator.checkDestinationQueue();	
@@ -137,7 +147,7 @@
 			
 		function handle_fl_btn_press(elevator, floorNum) {
 			//console.log("up q: ", JSON.stringify(elevator.upQueue), " down q: ", JSON.stringify(elevator.downQueue));
-			elevator.num == 1 && console.log("fl btn pressed: ", floorNum);
+			//elevator.num == 1 && console.log("fl btn pressed: ", floorNum);
 
 			if (in_array(floorNum, elevator.upQueue) || in_array(floorNum, elevator.downQueue)) {			
 				return;	
@@ -175,10 +185,11 @@
 				queue = elevator.upQueue;
 				elevator.goingDownIndicator(false);
 				elevator.goingUpIndicator(true);		
-			} else if (dir == "down"){
+			} else if (dir == "down") {
 				queue = elevator.downQueue;
 				elevator.goingUpIndicator(false);
 				elevator.goingDownIndicator(true);
+			} else {
 			}
 
 			if (elevator.currentFloor() == 0 && hold && can_accomodate(elevator)) {
@@ -187,7 +198,7 @@
 
 				setTimeout(setq, hold_delay);
 			} else {
-				setq()
+				setq();
 			}
 		}
 
@@ -206,8 +217,8 @@
 
 				// for each new floor, assign 1 pass wt to it, subtract it from gnl
 				for (f in nf) {
-					fl[f] = 1 p wt;
-					nl -= 1 p wt;	
+					//fl[f] = 1 p wt;
+					//nl -= 1 p wt;	
 				}
 
 				// distribute reamining load equally among all floors
@@ -234,9 +245,11 @@
 		function switch_dest_queue(elevator) {
 			if (elevator.upQueue.length == 0 && elevator.downQueue.length > 0) {
 				set_dest_queue(elevator, "down");
-			}
-			if (elevator.downQueue.length == 0 && elevator.upQueue.length > 0) {
+			} else if (elevator.downQueue.length == 0 && elevator.upQueue.length > 0) {
 				set_dest_queue(elevator, "up");
+			} else if (elevator.downQueue.length == 0 && elevator.upQueue.length == 0) {
+				elevator.goingUpIndicator(true);
+				elevator.goingDownIndicator(true);
 			}
 		}
 
@@ -245,21 +258,33 @@
 				elevator = elevators[i];
 
 				if (elevator.idle) {
-					if (floorNum == -1) {
-						if (waiting_floors.length > 0) {
-							floorNum = waiting_floors.shift();
-						} else {
-							return;
-						}					  
-					}		   
 					elevator.idle = false;
-					go_to_floor(elevator, floorNum);
+					//go_to_floor(elevator, floorNum);
+					elevator.goToFloor(floorNum);
 					return;
 				}
 			}
-			waiting_floors.push(floorNum);
+			dir == "up" && up_waiting_floors.push(floorNum);
+			dir == "down" && down_waiting_floors.push(floorNum);
+
 			//console.log("waiting floor ", floorNum);
 		};
+
+		function handle_idle(elevator) {
+			wf = up_waiting_floors.concat(down_waiting_floors);
+
+			if (wf.length == 0) {
+					return;
+			}
+
+			cf = elevator.currentFloor();
+			diff = wf.map(function(i) { return Math.abs(i - cf) });
+
+			min_idx = min_index(diff);
+			nearest_floor = wf[min_idx];
+
+			elevator.goToFloor(nearest_floor);
+		}
 		
 		function delete_if_in_array(val, arr) {
 			var index = arr.indexOf(val);
@@ -279,6 +304,27 @@
 
 		function in_array(val, arr) {
 			return arr.indexOf(val) > -1
+		}
+
+		function pop_if_in_array(val, arr) {
+			var index = arr.indexOf(val);
+			if (index < 0)
+					return -1;
+			arr.splice(index, 1);
+			return val;
+		}
+
+		function min_index(arr) {
+			var min = Number.MAX_SAFE_INTEGER;
+			var index;
+
+			for (i=0; i < arr.length; i++) {
+				if (arr[i] < min) {
+					min = arr[i];
+					index = i;
+				}
+			}
+			return index;
 		}
 	},
 
