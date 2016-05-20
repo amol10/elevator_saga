@@ -72,13 +72,13 @@
 						wf = up_waiting_floors;
 				else if (dir == "down") {
 						wf = down_waiting_floors;
-						elevator.num == 1 && console.log("down, passing fl: ", floorNum, " wf: ", JSON.stringify(down_waiting_floors));
+						//elevator.num == 1 && console.log("down, passing fl: ", floorNum, " wf: ", JSON.stringify(down_waiting_floors));
 				}
 
 				if (wf.length > 0 && can_accomodate(elevator)) {
 					floorNum = pop_if_in_array(floorNum, wf);
 					if (floorNum > -1)
-						go_to_floor2(elevator, floorNum);
+						elevator.goToFloor(floorNum, true);
 				}
 		}
 
@@ -86,12 +86,13 @@
 			delete_if_in_array(floorNum, elevator.upQueue);
 			delete_if_in_array(floorNum, elevator.downQueue);
 
-			elevator.num == 1 && console.log("stopped, dir: ", elevator.dir);
+			//elevator.num == 1 && console.log("stopped, dir: ", elevator.dir);
 
 			if (elevator.dir == "up")
 				delete_if_in_array(floorNum, up_waiting_floors);
 			else if (elevator.dir == "down")
 				delete_if_in_array(floorNum, down_waiting_floors);
+				//console.log("deleted from down waiting floors: ", floorNum);
 
 			elevator.floor_loads[floorNum] = 0;
 
@@ -288,10 +289,9 @@
 			}
 			if (dir == "up")
 					up_waiting_floors.push(floorNum);
-			else if (dir == "down")
+			if (dir == "down")
 					down_waiting_floors.push(floorNum);
-
-			//console.log("waiting floor ", floorNum);
+					//console.log("added to down waiting floors: ", floorNum);
 		};
 
 		function handle_idle_old(elevator) {
@@ -312,6 +312,9 @@
 
 		function handle_idle(elevator) {
 			wf = up_waiting_floors.concat(down_waiting_floors);
+			if (wf.length == 0)
+					return;
+
 			uf = [];
 			df = [];
 
@@ -332,14 +335,15 @@
 		}
 
 		function go_to_floor2(elevator, floorNum) {
-			if (elevator.currentFloor() > floorNum) {
+			if (elevator.currentFloor() < floorNum) {
 					elevator.goingUpIndicator(true);
 					elevator.goingDownIndicator(false);
 			} else {
 					elevator.goingDownIndicator(true);
 					elevator.goingUpIndicator(false);
 			}
-			elevator.goToFloor(floorNum);
+			elevator.idle = false;
+			elevator.goToFloor(floorNum, true);
 		}
 		
 		function delete_if_in_array(val, arr) {
